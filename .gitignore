@@ -40,3 +40,8 @@ Thumbs.db
 /.phpunit.cache/
 /coverage/
 *.log
+__pycache__/
+*.pyc
+/resources/js/actions/
+/resources/js/routes/
+/resources/js/wayfinder/

@@ -1,0 +1,8 @@
+<script setup lang="ts">
+import {useForm} from '@inertiajs/vue3';import {ref} from 'vue';import BusinessFields,{type Field} from './BusinessFields.vue';
+const props=defineProps<{actions:{key:string;label:string;url:string;fields:Field[]}[]}>();const active=ref<string|null>(null);
+function defaults(fields:Field[]):Record<string,any>{return Object.fromEntries(fields.map(f=>[f.key,f.type==='repeat'?(Array.isArray(f.default)?structuredClone(f.default):[defaults(f.fields??[])]):f.type==='date'?(f.default||new Date().toISOString().slice(0,10)):(f.default??'')]));}
+const forms=Object.fromEntries(props.actions.map(a=>[a.key,useForm<any>({...defaults(a.fields),operation_key:crypto.randomUUID()})]));
+function submit(a:any){if(!window.confirm('Konfirmoni veprimin e dokumentuar?'))return;forms[a.key].post(a.url,{preserveScroll:true,onSuccess:()=>{active.value=null;forms[a.key].operation_key=crypto.randomUUID();}});}
+</script>
+<template><section v-if="actions.length" class="tp-panel"><div class="tp-actions"><button v-for="a in actions" :key="a.key" class="tp-button secondary" @click="active=active===a.key?null:a.key">{{a.label}}</button></div><template v-for="a in actions" :key="a.key"><form v-if="active===a.key" class="tp-action-form" @submit.prevent="submit(a)"><BusinessFields :fields="a.fields" :model-value="forms[a.key].data()" :errors="forms[a.key].errors" @update:model-value="Object.assign(forms[a.key],$event)"/><p v-for="(e,k) in forms[a.key].errors" :key="k" class="tp-error">{{e}}</p><button class="tp-button" :disabled="forms[a.key].processing">Konfirmo</button></form></template></section></template>

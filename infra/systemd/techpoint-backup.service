@@ -1,0 +1,14 @@
+[Unit]
+Description=TechPoint consistent encrypted off-server backup
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+Environment=TECHPOINT_BACKUP_CONFIG=/etc/techpoint/backup.env
+ExecStart=/bin/bash /opt/techpoint-business-os/infra/scripts/backup.sh
+UMask=0077
+TimeoutStartSec=30min
+Nice=10
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,165 @@
+name: ${COMPOSE_PROJECT_NAME:-techpoint}
+x-app: &app
+  image: ${APP_IMAGE:-techpoint-business-os}:${APP_IMAGE_TAG:-local}
+  build:
+    context: ..
+    dockerfile: infra/php/Dockerfile
+    target: app
+    args:
+      APP_BUILD_REVISION: ${APP_IMAGE_TAG:-local}
+  restart: unless-stopped
+  init: true
+  environment: &app-env
+    APP_NAME: TechPoint Business OS
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_URL: ${APP_URL:?Set the final HTTPS application URL}
+    APP_KEY_FILE: /run/secrets/app_key
+    LOG_CHANNEL: stderr
+    LOG_LEVEL: warning
+    DB_CONNECTION: mysql
+    DB_HOST: db
+    DB_PORT: "3306"
+    DB_DATABASE: ${DB_DATABASE:-techpoint}
+    DB_USERNAME: ${DB_USERNAME:-techpoint}
+    DB_PASSWORD_FILE: /run/secrets/db_password
+    SESSION_DRIVER: database
+    SESSION_SECURE_COOKIE: "true"
+    SESSION_HTTP_ONLY: "true"
+    SESSION_ENCRYPT: "true"
+    SESSION_SAME_SITE: lax
+    CACHE_STORE: database
+    QUEUE_CONNECTION: database
+    FILESYSTEM_DISK: local
+    MAIL_MAILER: ${MAIL_MAILER:-log}
+    MAIL_HOST: ${MAIL_HOST:-127.0.0.1}
+    MAIL_PORT: ${MAIL_PORT:-587}
+    MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-system@example.invalid}
+    MAIL_FROM_NAME: TechPoint Business OS
+  secrets: [app_key, db_password]
+  volumes:
+    - app_storage:/var/www/html/storage
+  tmpfs:
+    - /tmp
+    - /var/www/html/bootstrap/cache
+  security_opt: [no-new-privileges:true]
+  networks: [private, outbound]
+  depends_on:
+    db:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+services:
+  migrate:
+    <<: *app
+    profiles: [maintenance]
+    restart: "no"
+    environment:
+      <<: *app-env
+      DB_USERNAME: root
+      DB_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets: [app_key, db_root_password]
+    command: ["php", "artisan", "migrate", "--force"]
+    mem_limit: 512m
+  app:
+    <<: *app
+    stop_signal: SIGQUIT
+    stop_grace_period: 70s
+    healthcheck:
+      test: ["CMD-SHELL", "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    mem_limit: 2g
+  queue:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=5", "--backoff=10", "--timeout=90", "--max-time=3600"]
+    stop_grace_period: 100s
+    mem_limit: 512m
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+    stop_grace_period: 70s
+    mem_limit: 256m
+  web:
+    image: ${WEB_IMAGE:-techpoint-web}:${APP_IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: infra/php/Dockerfile
+      target: web
+      args:
+        APP_BUILD_REVISION: ${APP_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      ERP_HOST: ${ERP_HOST:?Set the ERP hostname without scheme or path}
+      NGINX_ENVSUBST_FILTER: ^ERP_HOST$
+    volumes:
+      - ./nginx/production.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${TLS_DIRECTORY:-/etc/letsencrypt}:/certificates:ro
+      - ${ACME_DIRECTORY:-/var/lib/techpoint/acme}:/var/www/acme:ro
+      - app_storage:/var/www/storage:ro
+    ports:
+      - "80:8080"
+      - "443:8443"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [private, outbound]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-techpoint}
+      MYSQL_USER: ${DB_USERNAME:-techpoint}
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets: [db_password, db_root_password, db_backup_password]
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=1G
+      - --max-connections=80
+      - --binlog-expire-logs-seconds=604800
+      - --skip-name-resolve
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/production-init.sh:/docker-entrypoint-initdb.d/20-backup-user.sh:ro
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$(cat /run/secrets/db_root_password)\" mysql --user=root --silent --skip-column-names --execute='SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    stop_grace_period: 60s
+    mem_limit: 2g
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+networks:
+  private:
+    internal: true
+  outbound: {}
+volumes:
+  app_storage: {}
+  mysql_data: {}
+secrets:
+  app_key:
+    file: ${SECRETS_DIRECTORY:-./secrets}/app_key
+  db_password:
+    file: ${SECRETS_DIRECTORY:-./secrets}/db_password
+  db_root_password:
+    file: ${SECRETS_DIRECTORY:-./secrets}/db_root_password
+  db_backup_password:
+    file: ${SECRETS_DIRECTORY:-./secrets}/db_backup_password

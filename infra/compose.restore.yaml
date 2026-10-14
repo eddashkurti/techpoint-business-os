@@ -1,0 +1,60 @@
+# A restore drill has no web listener, public ports, workers or outbound network.
+# Always invoke through restore-drill.sh, which supplies a new project identity.
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: techpoint_restore
+      MYSQL_USER: techpoint_restore
+      MYSQL_PASSWORD_FILE: /run/secrets/restore_db_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/restore_root_password
+    secrets: [restore_db_password, restore_root_password]
+    volumes: [restore_mysql:/var/lib/mysql]
+    networks: [isolated]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$(cat /run/secrets/restore_root_password)\" mysql --user=root --silent --skip-column-names --execute='SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=256M"]
+  validate:
+    image: ${RESTORE_APP_IMAGE:?Supply the reviewed application image matching the backup revision}
+    environment:
+      APP_NAME: TechPoint Recovery Drill
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_URL: http://restore.invalid
+      APP_KEY_FILE: /run/secrets/restore_app_key
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: techpoint_restore
+      DB_USERNAME: techpoint_restore
+      DB_PASSWORD_FILE: /run/secrets/restore_db_password
+      SESSION_DRIVER: array
+      CACHE_STORE: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: log
+      LOG_CHANNEL: stderr
+      OUTBOUND_OPERATIONS_PAUSED: "true"
+    secrets: [restore_db_password, restore_app_key]
+    volumes:
+      - restore_storage:/var/www/html/storage
+      - ${RESTORE_BUNDLE:?}:/restore:ro
+    tmpfs: [/tmp, /var/www/html/bootstrap/cache]
+    networks: [isolated]
+    command: ["php", "artisan", "techpoint:reconcile", "--json"]
+networks:
+  isolated:
+    internal: true
+volumes:
+  restore_mysql: {}
+  restore_storage: {}
+secrets:
+  restore_db_password:
+    file: ${RESTORE_SECRET_DIRECTORY:?}/db_password
+  restore_root_password:
+    file: ${RESTORE_SECRET_DIRECTORY:?}/db_root_password
+  restore_app_key:
+    file: ${RESTORE_BUNDLE:?}/app_key

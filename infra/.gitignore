@@ -1,0 +1,10 @@
+/secrets/
+/.env
+/.env.*
+!/config/*.env.example
+/backup-staging/
+/restore-drills/
+/certificates/
+*.snapshot-id
+/tests/.work/
+**/__pycache__/

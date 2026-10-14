@@ -1,0 +1,14 @@
+name: Verify application
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: MySQL workflows, decimal rules, frontend and backup boundaries
+        run: bash infra/scripts/ci.sh
