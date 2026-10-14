@@ -18,4 +18,7 @@ mkdir -p storage/app/private storage/framework/cache/data storage/framework/sess
 chown -R www-data:www-data storage bootstrap/cache
 gosu www-data php artisan package:discover --no-ansi >&2
 gosu www-data php artisan config:cache --no-ansi >&2
+# FPM master opens the Docker log pipe as root, then starts www-data workers.
+# Background workers and maintenance commands run entirely as www-data.
+if [[ "${1:-}" == php-fpm ]]; then exec "$@"; fi
 exec gosu www-data "$@"

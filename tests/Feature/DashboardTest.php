@@ -28,4 +28,8 @@ class DashboardTest extends TestCase
         $response = $this->get(route('dashboard'));
         $response->assertOk();
     }
+    public function test_role_home_routes_to_a_permitted_business_screen(): void {
+        $this->seed(BusinessSeeder::class);
+        foreach (['warehouse'=>'/products','accountant'=>'/bills','sales'=>'/sales'] as $name=>$path) { $user=User::factory()->create(); $user->roles()->attach(Role::where('name',$name)->firstOrFail()); $this->actingAs($user)->get('/dashboard')->assertRedirect($path); $this->get($path)->assertOk(); }
+    }
 }

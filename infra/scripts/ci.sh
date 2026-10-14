@@ -16,6 +16,6 @@ compose up -d db
 compose run --rm app composer install --prefer-dist --no-interaction
 compose run --rm app php artisan key:generate --force
 compose run --rm app php artisan techpoint:routes
-compose run --rm app bash infra/scripts/test-dev.sh
 docker run --rm -v "$PWD:/app" -w /app -e WAYFINDER_SKIP=1 node:24-bookworm-slim bash -c 'npm ci && npm run build && npx vue-tsc --noEmit && npm audit --audit-level=high'
+compose run --rm app bash infra/scripts/test-dev.sh
 python3 -m unittest discover -s infra/tests

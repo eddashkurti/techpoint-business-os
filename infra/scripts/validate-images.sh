@@ -26,7 +26,7 @@ TLS_DIRECTORY=$bundle/tls
 ACME_DIRECTORY=$bundle/acme
 ENV
 compose() { docker compose --project-name "$project" --env-file "$bundle/compose.env" -f "$root/infra/compose.yaml" "$@"; }
-cleanup() { status=$?; trap - EXIT; compose down --volumes >/dev/null 2>&1 || true; exit "$status"; }
+cleanup() { status=$?; trap - EXIT; if [[ "$status" != 0 ]]; then compose logs --no-color db app > "$bundle/runtime-failure.log" 2>&1 || true; fi; compose down --volumes >/dev/null 2>&1 || true; exit "$status"; }
 trap cleanup EXIT
 compose up -d --wait db app
 compose --profile maintenance run --rm migrate > "$bundle/migrations.log" 2>&1

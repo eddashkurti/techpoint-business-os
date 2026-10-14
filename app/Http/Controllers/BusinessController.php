@@ -55,6 +55,7 @@ final class BusinessController extends Controller
 
     public function dashboard(Request $r, Reports $reports)
     {
+        if (!Gate::allows('dashboard.view')) { foreach (['sales.view'=>'/sales','inventory.view'=>'/products','finance.view'=>'/bills','reports.view'=>'/reports'] as $permission=>$path) if (Gate::allows($permission)) return redirect($path); return redirect('/settings/profile'); }
         Gate::authorize('dashboard.view');
         $filters = $this->filters($r);
         $from = $filters['from'] ?? now(config('techpoint.timezone'))->startOfMonth()->toDateString();
@@ -117,6 +118,7 @@ final class BusinessController extends Controller
         $keys = array_values(array_filter($keys, fn ($k) => ! in_array($k, ['user_id', 'updated_at', 'password', 'remember_token', 'credentials', 'request_payload', 'details', 'notes', 'lines', 'delivery_ids'], true)));
         $labels = $this->labels();
         $columns = array_map(fn ($k) => ['key' => $k, 'label' => $labels[$k] ?? ucfirst(str_replace('_', ' ', $k))], array_slice($keys, 0, 9));
+        if ($module==='products') $columns=array_map(fn ($k)=>['key'=>$k,'label'=>$labels[$k]??$k],['sku','name','barcode','selling_price','on_hand','reserved','minimum_stock','active']);
 
         return Inertia::render('business/Index', ['module' => $module, 'title' => $title, 'description' => 'Regjistra të ruajtur në bazën qendrore.', 'records' => $records, 'columns' => $columns, 'fields' => $fields, 'tools' => $this->tools($module), 'createAction' => $manage && $fields && Gate::allows($manage) ? match ($module) {
             'settlements' => '/courier-settlements','counts' => '/stock-counts','drafts' => '/journal-drafts',default => '/'.$module
@@ -253,6 +255,7 @@ final class BusinessController extends Controller
                 $actions[] = $this->action('refund', 'Rimburso pagesën', "/returns/$id/refund", [$this->field('amount', 'Shuma EUR', 'decimal'), $this->select('account_id', 'Llogaria', $this->accounts(true)), $this->field('refunded_on', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea')]);
             }
         }
+        if ($module==='bills') $related['Pagesat e faturës']=DB::table('payments')->where('bill_id',$id)->get();
         if ($module === 'bills' && Gate::allows('finance.manage')) {
             $actions[] = $this->action('pay', 'Paguaj faturën', "/bills/$id/pay", $this->paymentFields());
         }
