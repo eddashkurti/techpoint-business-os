@@ -11,6 +11,9 @@ COPY infra/php/production.ini /usr/local/etc/php/conf.d/zz-techpoint.ini
 COPY infra/php/pool.conf /usr/local/etc/php-fpm.d/zz-techpoint.conf
 
 FROM base AS dev
+COPY infra/php/dev-entrypoint.sh /usr/local/bin/techpoint-dev-entrypoint
+RUN chmod 755 /usr/local/bin/techpoint-dev-entrypoint
+ENTRYPOINT ["techpoint-dev-entrypoint"]
 CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
 
 FROM node:24-bookworm-slim AS node_runtime

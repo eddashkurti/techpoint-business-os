@@ -5,7 +5,10 @@ cd "$(realpath "$(dirname "$0")/../..")"
 [[ ! -e .env ]] || { echo 'CI must run in an isolated checkout without a runtime .env' >&2; exit 1; }
 cp .env.example .env
 printf '\nDB_PASSWORD=%s\nMYSQL_ROOT_PASSWORD=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" >> .env
-compose() { docker compose --env-file .env -f infra/compose.dev.yaml "$@"; }
+project="tpciverify-$(date -u +%Y%m%d%H%M%S)-$$"
+[[ "$project" =~ ^tpciverify-[0-9]+-[0-9]+$ ]] || exit 1
+[[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" && -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$project")" ]] || exit 1
+compose() { docker compose --project-name "$project" --env-file .env -f infra/compose.dev.yaml "$@"; }
 cleanup() { compose down --volumes; }
 trap cleanup EXIT
 compose build app
