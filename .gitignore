@@ -1,0 +1,42 @@
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+auth.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies and generated assets
+/vendor/
+/node_modules/
+/public/build/
+/public/hot
+/public/storage
+
+# Application data and database backups
+/storage/*.key
+/storage/app/
+/storage/logs/
+/storage/framework/
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+*.sql.gz
+*.bak
+*.dump
+/backups/
+/uploads/
+
+# Temporary work and local tools
+/work/
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+.phpunit.result.cache
+/.phpunit.cache/
+/coverage/
+*.log
