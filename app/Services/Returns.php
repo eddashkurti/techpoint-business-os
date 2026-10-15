@@ -56,7 +56,7 @@ final class Returns
                 $this->posting->journal('credit', $id, $data['credited_on'], $data['reason'], $rows);
             }
 
-return ['id' => $id];
+            return ['id' => $id];
         });
     }
 
@@ -113,14 +113,16 @@ return ['id' => $id];
             $this->posting->fiscalGate($r->sale_id, $data);
             $amount = Money::of($data['amount']);
             $prior = Posting::decimal((string) DB::table('refunds')->where('sale_return_id', $returnId)->sum('amount'));
-            $paid = Posting::decimal((string) DB::table('payments')->where('sale_id', $r->sale_id)->sum('amount'));
+            $paid = Posting::decimal((string) DB::table('payments')->where('sale_id', $r->sale_id)->sum('amount'))
+                ->plus((string) DB::table('customer_deposit_allocations')->where('sale_id', $r->sale_id)->sum('amount'));
             $allRefunds = Posting::decimal((string) DB::table('refunds')->join('sale_returns', 'sale_returns.id', '=', 'refunds.sale_return_id')->where('sale_returns.sale_id', $r->sale_id)->sum('refunds.amount'));
+            $allRefunds = $allRefunds->plus((string) DB::table('delivery_refunds as r')->join('delivery_credits as c', 'c.id', '=', 'r.delivery_credit_id')->where('c.sale_id', $r->sale_id)->sum('r.amount'));
             if (! $amount->decimal()->isPositive() || $prior->plus($amount->decimal())->compareTo($r->gross_total) > 0 || $allRefunds->plus($amount->decimal())->compareTo($paid) > 0) {
                 throw new \DomainException('Rimbursimi tejkalon kreditimin ose pagesat e marra.');
             }
             $id = DB::table('refunds')->insertGetId(['sale_return_id' => $returnId, 'account_id' => $data['account_id'], 'amount' => $amount->amount(), 'refunded_on' => $data['refunded_on'], 'operation_key' => $data['operation_key'], 'reason' => $data['reason'], 'user_id' => auth()->id(), 'created_at' => now()]);
             $this->posting->journal('refund', $id, $data['refunded_on'], $data['reason'], [['account' => '1100', 'debit' => $amount->amount(), 'party_id' => $s->customer_id], ['account_id' => $data['account_id'], 'credit' => $amount->amount()]]);
-            Audit::record('refund.posted','return',$returnId,['amount' => $amount->amount()]);
+            Audit::record('refund.posted', 'return', $returnId, ['amount' => $amount->amount()]);
 
             return ['id' => $id];
         });

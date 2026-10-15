@@ -9,6 +9,7 @@ use App\Services\Audit;
 use App\Services\Finance;
 use App\Services\Posting;
 use App\Services\Purchasing;
+use App\Services\ReportDownload;
 use App\Services\Reports;
 use App\Services\Returns;
 use App\Services\Selling;
@@ -51,6 +52,11 @@ final class BusinessController extends Controller
         'categories' => ['categories', 'Kategoritë', 'inventory.view', 'inventory.manage'],
         'drafts' => ['journal_drafts', 'Draftet kontabël', 'accounting.view', 'accounting.post'],
         'supplier-returns' => ['supplier_returns', 'Kthimet te furnitorët', 'purchasing.view', null],
+        'customer-deposits' => ['customer_deposits', 'Parapagimet e klientëve', 'finance.view', 'finance.manage'],
+        'supplier-credits' => ['supplier_credits', 'Kreditimet e furnitorëve', 'finance.view', 'finance.manage'],
+        'cost-adjustments' => ['post_receipt_cost_adjustments', 'Kostot pas pranimit', 'purchasing.view', null],
+        'promotions' => ['promotions', 'Kuponet dhe promocionet', 'sales.view', 'sales.manage'],
+        'delivery-credits' => ['delivery_credits', 'Kreditimet e dërgesave', 'sales.view', 'sales.refund'],
     ];
 
     public function dashboard(Request $r, Reports $reports)
@@ -62,7 +68,7 @@ final class BusinessController extends Controller
                 }
             }
 
-return redirect('/settings/profile');
+            return redirect('/settings/profile');
         }
         Gate::authorize('dashboard.view');
         $filters = $this->filters($r);
@@ -92,7 +98,7 @@ return redirect('/settings/profile');
         if ($r->filled('q')) {
             $search = (string) $r->input('q');
             $column = match ($module) {
-                'products','suppliers','customers','couriers','accounts','roles','channels','recurring','categories' => 'name','users' => 'email','stock' => 'reason','audit' => 'action','integrations' => 'name',default => 'reference'
+                'products','suppliers','customers','couriers','accounts','roles','channels','recurring','categories' => 'name','users' => 'email','stock' => 'reason','audit' => 'action','integrations' => 'name','promotions' => 'code','cost-adjustments' => 'document_reference',default => 'reference'
             };
             if (! in_array($module, ['periods', 'fiscal', 'budgets', 'deliveries', 'bank'], true)) {
                 $q->where($column, 'like', '%'.$search.'%');
@@ -132,7 +138,7 @@ return redirect('/settings/profile');
 
         return Inertia::render('business/Index', ['module' => $module, 'title' => $title, 'description' => 'Regjistra të ruajtur në bazën qendrore.', 'records' => $records, 'columns' => $columns, 'fields' => $fields, 'tools' => $this->tools($module), 'createAction' => $manage && $fields && Gate::allows($manage) ? match ($module) {
             'settlements' => '/courier-settlements','counts' => '/stock-counts','drafts' => '/journal-drafts',default => '/'.$module
-        } : null, 'readOnly' => ! $manage || ! Gate::allows($manage), 'filters' => ['q' => $r->input('q', '')], 'detail' => in_array($module, ['products', 'purchases', 'sales', 'returns', 'bills', 'journals', 'integrations', 'fiscal', 'periods', 'bank', 'deliveries', 'roles', 'users', 'counts', 'drafts', 'recurring', 'supplier-returns'], true)]);
+        } : null, 'readOnly' => ! $manage || ! Gate::allows($manage), 'filters' => ['q' => $r->input('q', '')], 'detail' => in_array($module, ['products', 'purchases', 'sales', 'returns', 'bills', 'journals', 'integrations', 'fiscal', 'periods', 'bank', 'deliveries', 'roles', 'users', 'counts', 'drafts', 'recurring', 'supplier-returns', 'customer-deposits', 'supplier-credits', 'cost-adjustments', 'promotions', 'delivery-credits'], true)]);
     }
 
     public function store(Request $r, string $module, Purchasing $purchasing, Selling $selling, Finance $finance, Posting $posting)
@@ -237,12 +243,15 @@ return redirect('/settings/profile');
             if (Gate::allows('purchasing.manage')) {
                 $actions[] = $this->action('cost', 'Shto kosto importi', "/purchases/$id/costs", $this->costFields());
                 $actions[] = $this->action('receive', 'Konfirmo pranimin', "/purchases/$id/receive", [$this->field('reference', 'Numri i pranimit'), $this->field('received_on', 'Data e pranimit', 'date'), $this->repeat('lines', 'Produktet e pranuara', [$this->select('purchase_line_id', 'Rreshti i porosisë', $lines->map(fn ($l) => ['value' => $l->id, 'label' => $l->sku.' · '.$l->name])->all()), $this->field('quantity', 'Sasia', 'decimal')])]);
+                if (in_array($record->status, ['partially_received', 'received'], true)) {
+                    $actions[] = $this->action('post-receipt-cost', 'Shto kosto pas pranimit', "/purchases/$id/post-receipt-cost", [$this->select('supplier_id', 'Furnitori i kostos', $this->parties('supplier')), $this->select('credit_account_id', 'Burimi i kostos', $this->costSourceAccounts()), $this->field('document_reference', 'Referenca e dokumentit'), $this->choice('category', 'Kategoria', ['freight' => 'Transport', 'customs' => 'Dogana', 'clearance' => 'Zhdoganimi', 'insurance' => 'Sigurim', 'domestic_transport' => 'Transport vendor', 'other' => 'Tjetër']), $this->choice('allocation_basis', 'Baza e shpërndarjes', ['value' => 'Vlera', 'quantity' => 'Sasia', 'weight' => 'Pesha', 'volume' => 'Vëllimi']), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('accounting_date', 'Data kontabël', 'date'), $this->field('reason', 'Arsyeja', 'textarea')]);
+                }
             }
         }
         if ($module === 'sales') {
             $lines = DB::table('sale_lines')->where('sale_id', $id)->get();
             $fulfillments = DB::table('fulfillments')->where('sale_id', $id)->get();
-            $related = ['Dërgimet' => $fulfillments, 'Pagesat' => DB::table('payments')->where('sale_id', $id)->get(), 'Kreditimet' => DB::table('sale_returns')->where('sale_id', $id)->get()];
+            $related = ['Dërgimet' => $fulfillments, 'Pagesat' => DB::table('payments')->where('sale_id', $id)->get(), 'Kreditimet e produkteve' => DB::table('sale_returns')->where('sale_id', $id)->get(), 'Parapagimet e shpërndara' => DB::table('customer_deposit_allocations')->where('sale_id', $id)->get(), 'Kreditimet e dërgesës' => DB::table('delivery_credits')->where('sale_id', $id)->get()];
             if (Gate::allows('sales.manage')) {
                 $actions[] = $this->action('dispatch', 'Konfirmo dërgimin', "/sales/$id/dispatch", [$this->field('dispatched_on', 'Data e dërgimit', 'date'), $this->select('courier_id', 'Korrieri', $this->parties('courier')), $this->field('tracking_reference', 'Referenca e gjurmimit'), $this->repeat('lines', 'Sasitë e dërguara', [$this->select('sale_line_id', 'Produkti', $lines->map(fn ($l) => ['value' => $l->id, 'label' => $l->sku.' · '.$l->name])->all()), $this->field('quantity', 'Sasia', 'decimal')])]);
                 $actions[] = $this->action('cancel', 'Anulo rezervimet e mbetura', "/sales/$id/cancel", [$this->field('reason', 'Arsyeja', 'textarea')]);
@@ -255,6 +264,10 @@ return redirect('/settings/profile');
             } if (Gate::allows('sales.refund')) {
                 $eligible = DB::table('fulfillment_lines as l')->join('fulfillments as f', 'f.id', '=', 'l.fulfillment_id')->join('products as p', 'p.id', '=', 'l.product_id')->where('f.sale_id', $id)->select('l.*', 'p.sku')->get();
                 $actions[] = $this->action('credit', 'Kredito produktet', "/sales/$id/credits", [$this->field('reference', 'Numri i kreditimit'), $this->field('credited_on', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea'), $this->repeat('lines', 'Produktet', [$this->select('fulfillment_line_id', 'Rreshti i dërguar', $eligible->map(fn ($l) => ['value' => $l->id, 'label' => $l->sku.' / #'.$l->id])->all()), $this->field('quantity', 'Sasia', 'decimal')])]);
+                $eligibleDelivery = $fulfillments->filter(fn ($f) => $f->recognized && Posting::decimal($f->delivery_charge)->plus($f->delivery_tax)->isPositive());
+                if ($eligibleDelivery->isNotEmpty()) {
+                    $actions[] = $this->action('delivery-credit', 'Kredito tarifën e dërgesës', "/sales/$id/delivery-credits", [$this->select('fulfillment_id', 'Dërgesa e njohur', $eligibleDelivery->map(fn ($f) => ['value' => $f->id, 'label' => '#'.$f->id])->all()), $this->field('reference', 'Referenca e kreditimit'), $this->field('credited_on', 'Data', 'date'), $this->field('amount', 'Shuma bruto EUR', 'decimal'), $this->field('reason', 'Arsyeja', 'textarea')]);
+                }
             }
         }
         if ($module === 'returns') {
@@ -319,6 +332,32 @@ return redirect('/settings/profile');
         }
         if ($module === 'supplier-returns') {
             $lines = DB::table('supplier_return_lines')->where('supplier_return_id', $id)->get();
+        }
+        if ($module === 'customer-deposits') {
+            $lines = DB::table('customer_deposit_allocations')->where('customer_deposit_id', $id)->get();
+            $related = ['Rimbursimet' => DB::table('customer_deposit_refunds')->where('customer_deposit_id', $id)->get()];
+            if (Gate::allows('finance.manage')) {
+                $actions[] = $this->action('allocate', 'Shpërnda te porosia', "/customer-deposits/$id/allocate", [$this->select('sale_id', 'Porosia e klientit', DB::table('sales')->where('customer_id', $record->customer_id)->get()->map(fn ($s) => ['value' => $s->id, 'label' => $s->reference])->all()), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('allocated_on', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea')]);
+                $actions[] = $this->action('refund', 'Rimburso parapagimin', "/customer-deposits/$id/refund", [$this->select('account_id', 'Arka / Banka', $this->accounts(true)), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('refunded_on', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea')]);
+            }
+        }
+        if ($module === 'supplier-credits') {
+            $lines = DB::table('supplier_credit_allocations')->where('supplier_credit_id', $id)->get();
+            if (Gate::allows('finance.manage')) {
+                $actions[] = $this->action('allocate', 'Lidhe me faturë', "/supplier-credits/$id/allocate", [$this->select('bill_id', 'Fatura e furnitorit', DB::table('bills')->where('supplier_id', $record->supplier_id)->get()->map(fn ($b) => ['value' => $b->id, 'label' => $b->reference])->all()), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('allocated_on', 'Data', 'date')]);
+            }
+        }
+        if ($module === 'cost-adjustments') {
+            $lines = DB::table('post_receipt_cost_adjustment_lines')->where('post_receipt_cost_adjustment_id', $id)->get();
+        }
+        if ($module === 'promotions') {
+            $lines = DB::table('promotion_redemptions')->where('promotion_id', $id)->get();
+        }
+        if ($module === 'delivery-credits') {
+            $lines = DB::table('delivery_refunds')->where('delivery_credit_id', $id)->get();
+            if (Gate::allows('sales.refund')) {
+                $actions[] = $this->action('refund', 'Rimburso klientin', "/delivery-credits/$id/refund", [$this->select('account_id', 'Arka / Banka', $this->accounts(true)), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('refunded_on', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea')]);
+            }
         }
         if ($module === 'drafts') {
             $lines = json_decode($record->lines, true);
@@ -476,26 +515,16 @@ return redirect('/settings/profile');
         return Inertia::render('business/Reports', ['title' => 'Raportet', 'rows' => $reports->ledger($filters), 'metrics' => $reports->metrics($filters), 'filters' => $filters, 'channels' => DB::table('sales_channels')->select('code', 'name')->get(), 'products' => $this->products(), 'productsReport' => $reports->products($filters), 'budget' => $reports->budgets($filters), 'monthly' => $reports->monthly($filters)]);
     }
 
-    public function export(Request $r, string $report, Reports $reports)
+    public function export(Request $r, string $report, Reports $reports, ReportDownload $download)
     {
         Gate::authorize('reports.export');
         $filters = $this->filters($r);
+        $format = $r->validate(['format' => ['nullable', Rule::in(['csv', 'xlsx', 'pdf'])]])['format'] ?? 'csv';
         $rows = $reports->export($report, $filters);
         Audit::record('report.exported', 'report', $report, ['filters' => $filters, 'rows' => count($rows)]);
+        $file = $download->make($report, $rows, $format);
 
-        return response()->streamDownload(function () use ($rows) {
-            $out = fopen('php://output', 'w');
-            if ($rows) {
-                fputcsv($out, array_keys($rows[0]), ',', '"', '');
-            } foreach ($rows as $row) {
-                $safe = array_map(function ($v) {
-                    $s = (string) $v;
-
-                    return preg_match('/^[=+@\-\t\r]/', $s) ? "'".$s : $s;
-                }, $row);
-                fputcsv($out, $safe, ',', '"', '');
-            } fclose($out);
-        }, $report.'.csv', ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'private, no-store']);
+        return response($file['content'], 200, ['Content-Type' => $file['mime'], 'Content-Disposition' => 'attachment; filename="'.$file['filename'].'"', 'Cache-Control' => 'private, no-store']);
     }
 
     private function definition(string $module): array
@@ -541,7 +570,7 @@ return redirect('/settings/profile');
             return [$this->action('adjust', 'Korrigjim i dokumentuar i stokut', '/stock/adjust', [$this->select('product_id', 'Produkti', $this->products()), $this->field('quantity', 'Sasia me shenjë (+ shtim / − ulje)', 'decimal'), $this->field('value', 'Vlera e shtimit EUR (bosh për ulje)', 'decimal'), $this->choice('condition', 'Gjendja', ['sellable' => 'Për shitje', 'quarantine' => 'Në inspektim', 'damaged' => 'Të dëmtuara']), $this->field('accounting_date', 'Data', 'date'), $this->field('reason', 'Arsyeja (10+ shenja)', 'textarea')])];
         }
         if ($module === 'bank' && Gate::allows('finance.manage')) {
-            return [$this->action('transfer', 'Transferim ndërmjet arkës dhe bankës', '/finance/transfer', [$this->select('from_account_id', 'Nga', $this->accounts(true)), $this->select('to_account_id', 'Në', $this->accounts(true)), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('accounting_date', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea')])];
+            return [$this->action('transfer', 'Transferim ndërmjet arkës dhe bankës', '/finance/transfer', [$this->select('from_account_id', 'Nga', $this->accounts(true)), $this->select('to_account_id', 'Në', $this->accounts(true)), $this->field('amount', 'Shuma EUR', 'decimal'), $this->field('accounting_date', 'Data', 'date'), $this->field('reason', 'Arsyeja', 'textarea')]), $this->action('import', 'Importo ekstrakt CSV', '/imports/bank', [$this->select('account_id', 'Llogaria bankare', $this->accounts(true)), $this->field('file', 'Skedari CSV', 'file')])];
         }
 
         return [];
@@ -555,6 +584,11 @@ return redirect('/settings/profile');
         }
 
         return $q->orderBy('code')->get()->map(fn ($a) => ['value' => $a->id, 'label' => $a->code.' · '.$a->name])->all();
+    }
+
+    private function costSourceAccounts(): array
+    {
+        return DB::table('accounts')->where('active', true)->whereIn('code', ['1000', '1010', '2100'])->orderBy('code')->get()->map(fn ($a) => ['value' => $a->id, 'label' => $a->code.' · '.$a->name])->all();
     }
 
     private function parties(string $kind): array
@@ -584,7 +618,7 @@ return redirect('/settings/profile');
 
     private function saleRules(bool $header = true): array
     {
-        $r = ['delivery_charge' => 'nullable|string|regex:/^\d{1,15}(\.\d{1,2})?$/', 'lines' => 'required|array|min:1', 'lines.*.product_id' => 'required|integer|exists:products,id|distinct', 'lines.*.quantity' => 'required|string|regex:/^\d{1,12}(\.\d{1,6})?$/', 'lines.*.unit_price' => 'nullable|string|regex:/^\d{1,15}(\.\d{1,8})?$/', 'lines.*.discount' => 'nullable|string|regex:/^\d{1,15}(\.\d{1,2})?$/'];
+        $r = ['delivery_charge' => 'nullable|string|regex:/^\d{1,15}(\.\d{1,2})?$/', 'promotion_code' => 'nullable|string|max:60', 'lines' => 'required|array|min:1', 'lines.*.product_id' => 'required|integer|exists:products,id|distinct', 'lines.*.quantity' => 'required|string|regex:/^\d{1,12}(\.\d{1,6})?$/', 'lines.*.unit_price' => 'nullable|string|regex:/^\d{1,15}(\.\d{1,8})?$/', 'lines.*.discount' => 'nullable|string|regex:/^\d{1,15}(\.\d{1,2})?$/'];
         if ($header) {
             $r += ['operation_key' => 'required|string|min:8|max:100', 'reference' => 'required|string|max:100', 'channel_id' => 'required|integer|exists:sales_channels,id', 'customer_id' => 'nullable|integer|exists:parties,id', 'ordered_on' => 'required|date', 'notes' => 'nullable|string|max:3000'];
         }
@@ -603,6 +637,7 @@ return redirect('/settings/profile');
             'suppliers','customers','couriers' => ['name' => 'required|string|max:255', 'country' => 'nullable|string|size:2', 'tax_number' => 'nullable|string|max:60', 'email' => 'nullable|email|max:255', 'phone' => 'nullable|string|max:50', 'address' => 'nullable|string|max:1000'],
             'purchases' => ['reference' => 'required|string|max:100|unique:purchase_orders', 'supplier_id' => 'required|integer|exists:parties,id', 'invoice_reference' => 'nullable|string|max:100', 'ordered_on' => 'required|date', 'currency' => 'required|string|size:3', 'exchange_rate' => 'required|string|regex:/^\d{1,12}(\.\d{1,12})?$/', 'exchange_rate_source' => 'required|string|max:255', 'notes' => 'nullable|string|max:3000', 'lines' => 'required|array|min:1', 'lines.*.product_id' => 'required|integer|exists:products,id|distinct', 'lines.*.quantity' => $decimal, 'lines.*.unit_price' => 'required|string|regex:/^\d{1,15}(\.\d{1,8})?$/', 'lines.*.weight' => 'nullable|string|regex:/^\d{1,12}(\.\d{1,6})?$/', 'lines.*.volume' => 'nullable|string|regex:/^\d{1,12}(\.\d{1,6})?$/'],
             'sales' => $this->saleRules(),
+            'promotions' => ['code' => 'required|string|max:60|unique:promotions', 'name' => 'required|string|max:255', 'discount_type' => ['required', Rule::in(['percent', 'fixed'])], 'discount_value' => $money, 'minimum_order_amount' => $money, 'max_redemptions' => 'nullable|integer|min:1', 'per_customer_limit' => 'nullable|integer|min:1', 'starts_on' => 'nullable|date', 'ends_on' => 'nullable|date|after_or_equal:starts_on', 'active' => 'required|boolean'],
             'bills' => ['operation_key' => 'required|string|min:8|max:100', 'supplier_id' => 'nullable|integer|exists:parties,id', 'purchase_order_id' => 'nullable|integer|exists:purchase_orders,id', 'reference' => 'required|string|max:100', 'accounting_date' => 'required|date', 'account_id' => 'required|integer|exists:accounts,id', 'net_amount' => $money, 'vat_amount' => $money, 'recoverable_vat' => $money, 'category' => 'required|string|max:80', 'description' => 'required|string|max:1000'],
             'accounts' => ['code' => 'required|string|max:30|unique:accounts', 'name' => 'required|string|max:255', 'type' => ['required', Rule::in(['asset', 'liability', 'equity', 'revenue', 'expense'])]],
             'periods' => ['name' => 'required|string|max:100', 'starts_on' => 'required|date', 'ends_on' => 'required|date|after_or_equal:starts_on'],
@@ -628,7 +663,7 @@ return redirect('/settings/profile');
             'drafts' => [$this->field('reference', 'Referenca'), $this->field('accounting_date', 'Data kontabël', 'date'), $this->field('description', 'Përshkrimi', 'textarea'), $this->repeat('lines', 'Rreshtat e ditarit', [$this->select('account_id', 'Llogaria', $this->accounts()), $this->field('debit', 'Debi EUR', 'decimal', '0'), $this->field('credit', 'Kredi EUR', 'decimal', '0')])],
             'suppliers','customers','couriers' => [$this->field('name', 'Emri'), $this->field('country', 'Shteti (kodi me dy shkronja)'), $this->field('tax_number', 'Numri fiskal'), $this->field('email', 'Email', 'email'), $this->field('phone', 'Telefoni'), $this->field('address', 'Adresa', 'textarea')],
             'purchases' => [$this->field('reference', 'Numri i porosisë'), $this->select('supplier_id', 'Furnitori', $this->parties('supplier')), $this->field('invoice_reference', 'Numri i faturës'), $this->field('ordered_on', 'Data', 'date'), $this->field('currency', 'Monedha', 'text', 'EUR'), $this->field('exchange_rate', 'Kursi për 1 njësi në EUR', 'decimal', '1'), $this->field('exchange_rate_source', 'Burimi i kursit'), $this->repeat('lines', 'Produktet', [$this->select('product_id', 'Produkti', $this->products()), $this->field('quantity', 'Sasia', 'decimal'), $this->field('unit_price', 'Çmimi për njësi', 'decimal'), $this->field('weight', 'Pesha për njësi', 'decimal', '0'), $this->field('volume', 'Vëllimi për njësi', 'decimal', '0')])],
-            'sales' => [$this->field('reference', 'Numri i porosisë'), $this->select('channel_id', 'Kanali', DB::table('sales_channels')->where('active', true)->get()->map(fn ($c) => ['value' => $c->id, 'label' => $c->name])->all()), $this->select('customer_id', 'Klienti', $this->parties('customer')), $this->field('ordered_on', 'Data', 'date'), $this->field('delivery_charge', 'Tarifa e klientit për dërgesë pa TVSH', 'decimal', '0'), $this->repeat('lines', 'Produktet', [$this->select('product_id', 'Produkti', $this->products()), $this->field('quantity', 'Sasia', 'decimal', '1'), $this->field('unit_price', 'Çmimi pa TVSH (bosh = katalogu)', 'decimal'), $this->field('discount', 'Zbritja EUR', 'decimal', '0')])],
+            'sales' => [$this->field('reference', 'Numri i porosisë'), $this->select('channel_id', 'Kanali', DB::table('sales_channels')->where('active', true)->get()->map(fn ($c) => ['value' => $c->id, 'label' => $c->name])->all()), $this->select('customer_id', 'Klienti', $this->parties('customer')), $this->field('ordered_on', 'Data', 'date'), $this->field('promotion_code', 'Kodi i promocionit'), $this->field('delivery_charge', 'Tarifa e klientit për dërgesë pa TVSH', 'decimal', '0'), $this->repeat('lines', 'Produktet', [$this->select('product_id', 'Produkti', $this->products()), $this->field('quantity', 'Sasia', 'decimal', '1'), $this->field('unit_price', 'Çmimi pa TVSH (bosh = katalogu)', 'decimal'), $this->field('discount', 'Zbritja EUR', 'decimal', '0')])],
             'bills' => [$this->select('supplier_id', 'Furnitori', $this->parties('supplier')), $this->field('reference', 'Numri i faturës'), $this->field('accounting_date', 'Data kontabël', 'date'), $this->select('account_id', 'Llogaria (2150 për blerje inventari)', $this->accounts()), $this->field('net_amount', 'Shuma pa TVSH', 'decimal'), $this->field('vat_amount', 'TVSH e faturës', 'decimal', '0'), $this->field('recoverable_vat', 'TVSH e zbritshme', 'decimal', '0'), $this->field('category', 'Kategoria'), $this->field('description', 'Përshkrimi', 'textarea')],
             'accounts' => [$this->field('code', 'Kodi'), $this->field('name', 'Emri'), $this->choice('type', 'Lloji', ['asset' => 'Aktiv', 'liability' => 'Detyrim', 'equity' => 'Kapital', 'revenue' => 'Të ardhura', 'expense' => 'Shpenzim'])],
             'periods' => [$this->field('name', 'Emri'), $this->field('starts_on', 'Nga', 'date'), $this->field('ends_on', 'Deri', 'date')],
@@ -639,6 +674,9 @@ return redirect('/settings/profile');
             'roles' => [$this->field('name', 'Kodi i rolit'), $this->field('label', 'Emri i rolit')],
             'budgets' => [$this->select('account_id', 'Llogaria', $this->accounts()), $this->field('month', 'Muaji (dita e parë)', 'date'), $this->field('amount', 'Buxheti EUR', 'decimal')],
             'recurring' => [$this->field('name', 'Përshkrimi'), $this->select('supplier_id', 'Furnitori', $this->parties('supplier')), $this->select('account_id', 'Llogaria', $this->accounts()), $this->field('amount', 'Shuma pa TVSH', 'decimal'), $this->field('next_on', 'Data e ardhshme', 'date')],
+            'customer-deposits' => [$this->select('customer_id', 'Klienti', $this->parties('customer')), $this->select('account_id', 'Arka / Banka', $this->accounts(true)), $this->field('reference', 'Referenca'), $this->field('amount', 'Shuma EUR', 'decimal'), $this->choice('method', 'Mënyra', ['cash' => 'Para të gatshme', 'bank' => 'Bankë', 'card' => 'Kartelë']), $this->field('received_on', 'Data e pranimit', 'date'), $this->field('reason', 'Arsyeja / dokumenti', 'textarea')],
+            'supplier-credits' => [$this->select('supplier_id', 'Furnitori', $this->parties('supplier')), $this->select('bill_id', 'Fatura burimore', DB::table('bills')->get()->map(fn ($b) => ['value' => $b->id, 'label' => $b->reference])->all()), $this->select('purchase_order_id', 'Blerja burimore', DB::table('purchase_orders')->get()->map(fn ($p) => ['value' => $p->id, 'label' => $p->reference])->all()), $this->select('supplier_return_id', 'Kthimi te furnitori', DB::table('supplier_returns')->get()->map(fn ($r) => ['value' => $r->id, 'label' => $r->reference])->all()), $this->select('account_id', 'Llogaria e shpenzimit', $this->accounts()), $this->field('reference', 'Referenca e kreditimit'), $this->field('credited_on', 'Data', 'date'), $this->field('net_amount', 'Shuma pa TVSH', 'decimal'), $this->field('vat_amount', 'TVSH', 'decimal', '0'), $this->field('recoverable_vat', 'TVSH e zbritshme', 'decimal', '0'), $this->field('reason', 'Arsyeja', 'textarea')],
+            'promotions' => [$this->field('code', 'Kodi i kuponit'), $this->field('name', 'Emri'), $this->choice('discount_type', 'Lloji i zbritjes', ['percent' => 'Përqindje', 'fixed' => 'Shumë fikse EUR']), $this->field('discount_value', 'Vlera e zbritjes', 'decimal'), $this->field('minimum_order_amount', 'Porosia minimale EUR', 'decimal', '0'), $this->field('max_redemptions', 'Kufiri total (bosh = pa kufi)', 'number'), $this->field('per_customer_limit', 'Kufiri për klient (bosh = pa kufi)', 'number'), $this->field('starts_on', 'Fillon', 'date'), $this->field('ends_on', 'Mbaron', 'date'), $this->field('active', 'Aktiv', 'checkbox', true)],
             'bank' => [$this->select('account_id', 'Llogaria', $this->accounts(true)), $this->field('external_reference', 'Referenca e bankës'), $this->field('date', 'Data', 'date'), $this->field('amount', 'Shuma me shenjë EUR', 'decimal'), $this->field('description', 'Përshkrimi', 'textarea')],default => [],
         };
     }

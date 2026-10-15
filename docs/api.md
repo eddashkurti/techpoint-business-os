@@ -1,6 +1,6 @@
 # Application JSON/REST contract
 
-This release exposes authenticated session routes for its own UI and JSON clients. Send `Accept: application/json`; POST requests require the Laravel CSRF token and authenticated cookie. HTTPS is required in production. There is no anonymous business API or bearer-token provisioning in this release. Permissions are evaluated on the server for each request, including requests made outside the UI.
+This release exposes authenticated session routes for its own UI and JSON clients. Send `Accept: application/json`; POST requests require the Laravel CSRF token and authenticated cookie. HTTPS is required in production. Owners can also create scoped read-only bearer tokens. Permissions are evaluated on the server for each request, including requests made outside the UI.
 
 ## Input and responses
 
@@ -33,7 +33,10 @@ Creation returns `{ "id": 123 }` with HTTP 201 for generic records. Transaction 
 | POST /documents; GET /documents/{id} | Private supporting document upload/download | Source-specific permissions |
 | POST /integrations/{id}/reconcile, /retry, /credentials | Read-only Woo maintenance | integrations.manage |
 | POST /webhooks/woocommerce/{connection} | Signed Woo webhook ingress | Raw-body HMAC, throttle, deduplication |
-| GET /reports/{report}/export | CSV with supported filters | reports.export |
+| GET /reports/{report}/export?format=csv\|xlsx\|pdf | Report download with supported filters | reports.export |
+| GET /api/v1/products | Read-only catalog API | bearer `catalog.read` |
+| GET /api/v1/sales | Read-only sales API | bearer `sales.read` |
+| GET /api/v1/reports/{report} | Read-only report API | bearer `reports.read` |
 
 ## Example: receipt
 
@@ -49,3 +52,5 @@ Creation returns `{ "id": 123 }` with HTTP 201 for generic records. Transaction 
 Dispatch uses `sale_line_id`; financial credit uses `fulfillment_line_id`; physical return uses `return_line_id`. Each must belong to the specified document. Cash/bank payments include `account_id`, `amount`, `paid_on`, `method`, `reference` and the operation key. No request may directly assign inventory balances, journal totals, fiscal success or historical movement values.
 
 WooCommerce external order/product IDs are unique per connection and resource type. Shadow records preserve source modification timestamps. Webhooks fetch authoritative current records before applying observations. Deleted source records preserve local history and never reverse ERP stock/accounting. Woo credentials are encrypted using the application key, which must be retained in protected backups.
+
+Bearer tokens are created and revoked through the authenticated `/api-tokens` page. The secret is returned only at creation; persistent storage uses a SHA-256 hash. Send the token in `Authorization: Bearer <token>`. Revoked, expired, or deactivated-user tokens return 401, and an otherwise valid token without the endpoint's scope returns 403.

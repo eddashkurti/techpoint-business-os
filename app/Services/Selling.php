@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Domain\Finance\Money;
+use App\Domain\Purchasing\LandedCostAllocator;
+use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
 
@@ -12,7 +14,7 @@ final class Selling
 {
     public function __construct(private Posting $posting, private Stock $stock, private Finance $finance) {}
 
-    public function quote(array $data): array
+    public function quote(array $data, bool $lockPromotion = false): array
     {
         $settings = $this->posting->configured();
         $net = Posting::decimal('0');
@@ -42,26 +44,43 @@ final class Selling
             $net = $net->plus($lineNet);
             $tax = $tax->plus($lineTax);
         }
+        $promotion = $this->promotion($data, $net, $lockPromotion);
+        if ($promotion) {
+            $shares = (new LandedCostAllocator)->allocate(Money::of($promotion['discount']), collect($lines)->mapWithKeys(fn ($line, $index) => [(string) $index => $line['net_total']])->all());
+            foreach ($lines as $index => &$line) {
+                $discount = $shares[(string) $index]->decimal();
+                $line['promotion_discount'] = (string) $discount;
+                $line['discount'] = (string) Posting::decimal($line['discount'])->plus($discount);
+                $line['net_total'] = (string) Posting::decimal($line['net_total'])->minus($discount);
+                $line['tax_total'] = (string) Posting::decimal($line['net_total'])->multipliedBy($line['tax_rate'])->dividedBy('100', 2, RoundingMode::HALF_UP);
+            }
+            unset($line);
+            $net = collect($lines)->reduce(fn ($carry, $line) => $carry->plus($line['net_total']), Posting::decimal('0'));
+            $tax = collect($lines)->reduce(fn ($carry, $line) => $carry->plus($line['tax_total']), Posting::decimal('0'));
+        }
         $delivery = Money::of($data['delivery_charge'] ?? '0');
         if ($delivery->isNegative()) {
             throw new \DomainException('Tarifa e dërgesës nuk mund të jetë negative.');
         }
         $deliveryTax = ($settings['vat_registered'] ?? false) ? $delivery->decimal()->multipliedBy($settings['delivery_tax_rate'])->dividedBy('100', 2, RoundingMode::HALF_UP) : Posting::decimal('0.00');
 
-        return ['net' => (string) $net->plus($delivery->decimal())->toScale(2), 'tax' => (string) $tax->plus($deliveryTax)->toScale(2), 'gross' => (string) $net->plus($tax)->plus($delivery->decimal())->plus($deliveryTax)->toScale(2), 'delivery_tax' => (string) $deliveryTax, 'lines' => $lines];
+        return ['net' => (string) $net->plus($delivery->decimal())->toScale(2), 'tax' => (string) $tax->plus($deliveryTax)->toScale(2), 'gross' => (string) $net->plus($tax)->plus($delivery->decimal())->plus($deliveryTax)->toScale(2), 'delivery_tax' => (string) $deliveryTax, 'promotion' => $promotion, 'lines' => $lines];
     }
 
     public function create(array $data): array
     {
         return $this->posting->once('sale.create', $data, function () use ($data) {
             $settings = $this->posting->configured();
-            $quote = $this->quote($data);
-            $id = DB::table('sales')->insertGetId(['reference' => $data['reference'], 'channel_id' => $data['channel_id'], 'customer_id' => $data['customer_id'] ?? null, 'recognition_policy' => $settings['recognition_policy'], 'fiscal_required' => $settings['fiscal_required'], 'ordered_on' => $data['ordered_on'], 'net_total' => $quote['net'], 'tax_total' => $quote['tax'], 'gross_total' => $quote['gross'], 'delivery_charge' => $data['delivery_charge'] ?? '0', 'delivery_tax' => $quote['delivery_tax'], 'notes' => $data['notes'] ?? null, 'user_id' => auth()->id(), 'created_at' => now(), 'updated_at' => now()]);
+            $quote = $this->quote($data, true);
+            $id = DB::table('sales')->insertGetId(['reference' => $data['reference'], 'channel_id' => $data['channel_id'], 'promotion_id' => $quote['promotion']['id'] ?? null, 'promotion_code' => $quote['promotion']['code'] ?? null, 'customer_id' => $data['customer_id'] ?? null, 'recognition_policy' => $settings['recognition_policy'], 'fiscal_required' => $settings['fiscal_required'], 'ordered_on' => $data['ordered_on'], 'net_total' => $quote['net'], 'tax_total' => $quote['tax'], 'gross_total' => $quote['gross'], 'delivery_charge' => $data['delivery_charge'] ?? '0', 'delivery_tax' => $quote['delivery_tax'], 'promotion_discount' => $quote['promotion']['discount'] ?? '0.00', 'notes' => $data['notes'] ?? null, 'user_id' => auth()->id(), 'created_at' => now(), 'updated_at' => now()]);
             $lines = $quote['lines'];
             usort($lines, fn ($a, $b) => $a['product_id'] <=> $b['product_id']);
             foreach ($lines as $line) {
                 $this->stock->reserve($line['product_id'], $line['quantity']);
                 DB::table('sale_lines')->insert(['sale_id' => $id, ...$line]);
+            }
+            if ($quote['promotion']) {
+                DB::table('promotion_redemptions')->insert(['promotion_id' => $quote['promotion']['id'], 'sale_id' => $id, 'customer_id' => $data['customer_id'] ?? null, 'code' => $quote['promotion']['code'], 'discount_amount' => $quote['promotion']['discount'], 'created_at' => now()]);
             }
             Audit::record('sale.created', 'sale', $id, ['channel_id' => $data['channel_id']]);
 
@@ -203,9 +222,12 @@ final class Selling
             $this->finance->cashAccount($data['account_id']);
             $amount = Money::of($data['amount']);
             $paid = Posting::decimal((string) DB::table('payments')->where('sale_id', $saleId)->sum('amount'));
+            $allocated = Posting::decimal((string) DB::table('customer_deposit_allocations')->where('sale_id', $saleId)->sum('amount'));
             $credits = Posting::decimal((string) DB::table('sale_returns')->where('sale_id', $saleId)->sum('gross_total'));
+            $deliveryCredits = Posting::decimal((string) DB::table('delivery_credits')->where('sale_id', $saleId)->sum('gross_amount'));
             $refunded = Posting::decimal((string) DB::table('refunds')->join('sale_returns', 'sale_returns.id', '=', 'refunds.sale_return_id')->where('sale_returns.sale_id', $saleId)->sum('refunds.amount'));
-            if (! $amount->decimal()->isPositive() || $paid->minus($refunded)->plus($amount->decimal())->compareTo(Posting::decimal($this->recognizedGross($saleId))->minus($credits)) > 0) {
+            $deliveryRefunds = Posting::decimal((string) DB::table('delivery_refunds as r')->join('delivery_credits as c', 'c.id', '=', 'r.delivery_credit_id')->where('c.sale_id', $saleId)->sum('r.amount'));
+            if (! $amount->decimal()->isPositive() || $paid->plus($allocated)->minus($refunded)->minus($deliveryRefunds)->plus($amount->decimal())->compareTo(Posting::decimal($this->recognizedGross($saleId))->minus($credits)->minus($deliveryCredits)) > 0) {
                 throw new \DomainException('Pagesa tejkalon borxhin e njohur të klientit. Parapagimet kërkojnë rrjedhë të veçantë fiskale.');
             }
             $id = DB::table('payments')->insertGetId(['kind' => 'customer', 'sale_id' => $saleId, 'account_id' => $data['account_id'], 'amount' => $amount->amount(), 'method' => $data['method'], 'reference' => $data['reference'], 'operation_key' => $data['operation_key'], 'paid_on' => $data['paid_on'], 'user_id' => auth()->id(), 'created_at' => now()]);
@@ -222,5 +244,44 @@ final class Selling
         $shipping = DB::table('fulfillments')->where('sale_id', $saleId)->where('recognized', true)->selectRaw('COALESCE(SUM(delivery_charge+delivery_tax),0) total')->first();
 
         return (string) Posting::decimal($lines->total)->plus($shipping->total);
+    }
+
+    private function promotion(array $data, BigDecimal $net, bool $lock): ?array
+    {
+        $code = strtoupper(trim((string) ($data['promotion_code'] ?? '')));
+        if ($code === '') {
+            return null;
+        }
+        $query = DB::table('promotions')->where('code', $code)->where('active', true);
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+        $promotion = $query->first();
+        if (! $promotion || ($promotion->starts_on && $data['ordered_on'] < $promotion->starts_on) || ($promotion->ends_on && $data['ordered_on'] > $promotion->ends_on)) {
+            throw new \DomainException('Kodi i promocionit nuk është aktiv për këtë datë.');
+        }
+        if ($net->compareTo($promotion->minimum_order_amount) < 0) {
+            throw new \DomainException('Porosia nuk arrin minimumin për këtë promocion.');
+        }
+        $redemptions = DB::table('promotion_redemptions')->where('promotion_id', $promotion->id);
+        if ($promotion->max_redemptions !== null && $redemptions->count() >= $promotion->max_redemptions) {
+            throw new \DomainException('Promocioni ka arritur kufirin e përdorimit.');
+        }
+        if ($promotion->per_customer_limit !== null) {
+            if (empty($data['customer_id']) || (clone $redemptions)->where('customer_id', $data['customer_id'])->count() >= $promotion->per_customer_limit) {
+                throw new \DomainException('Ky promocion kërkon klient dhe kufiri për klientin është arritur.');
+            }
+        }
+        $discount = $promotion->discount_type === 'percent'
+            ? $net->multipliedBy($promotion->discount_value)->dividedBy('100', 2, RoundingMode::HALF_UP)
+            : Posting::decimal($promotion->discount_value);
+        if (! $discount->isPositive()) {
+            throw new \DomainException('Vlera e promocionit nuk është e vlefshme.');
+        }
+        if ($discount->compareTo($net) > 0) {
+            $discount = $net;
+        }
+
+        return ['id' => $promotion->id, 'code' => $promotion->code, 'discount' => Posting::cents($discount)];
     }
 }

@@ -43,7 +43,7 @@ class HandleInertiaRequests extends Middleware
                 'permissions' => $request->user()?->permissionNames() ?? [],
             ],
             'business' => ['name' => 'TechPoint Kosova', 'currency' => 'EUR', 'timezone' => config('techpoint.timezone')],
-            'flash' => ['success' => fn () => $request->session()->get('success')],
+            'flash' => ['success' => fn () => $request->session()->get('success'), 'api_token' => fn () => $request->session()->get('api_token')],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }

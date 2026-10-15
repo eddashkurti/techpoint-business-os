@@ -9,7 +9,8 @@ The owner authorized implementation without further phase approvals. The origina
 | Inventory and purchasing | Implemented locally | Exact unit conversions, allocation, partial receipts, stock corrections/counts, physical supplier returns |
 | Sales and returns | Implemented locally | Reservations, partial fulfilments, recognition policy, partial recognized-sale payments, credits, physical receipts and refunds |
 | Accounting and finance | Implemented locally | Balanced immutable journals, periods, drafts, bills, recurring confirmation, courier and bank reconciliation |
-| Analytics | Implemented locally | Ledger-derived metrics, 12-month charts, product margins, budgets and CSV reports |
+| Analytics | Implemented locally | Ledger-derived metrics, 12-month charts, product margins, budgets and CSV/XLSX/PDF reports |
+| Advanced operations | Implemented locally | Deposits, supplier credits, late landed-cost split, promotions, delivery refunds, CSV templates/previews/imports, bank-file import/matching and scoped read-only API tokens |
 | WooCommerce | Implemented read-only boundary | Protocol tests; real credentials and live store reconciliation unavailable |
 | Fiscal | Interface and safe state machine implemented | No certified provider SDK/API agreement or sandbox; production issuance is unavailable |
 | POS/hardware | Browser POS and internal print document implemented | Fiscal completion, silent printing and hardware compatibility remain unverified |
@@ -18,13 +19,13 @@ The owner authorized implementation without further phase approvals. The origina
 
 ## Deliberate functional boundaries
 
-Payments are limited to recognized revenue minus credits and previous net receipts. Customer deposits are refused rather than incorrectly posting them as revenue. The deposits account is reserved for a future provider-verified workflow.
+Payments are limited to recognized revenue minus credits and previous net receipts. Customer deposits post to a liability account, can be allocated only to recognized receivables, and can be refunded only from their remaining balance. Live fiscal treatment of a prepayment still needs confirmation from the accountant and certified provider.
 
-Landed costs are finalized before the first receipt. Later invoices/cost changes require a designed revaluation workflow; the system refuses to silently rewrite historical cost of goods sold. Supplier physical returns create a claim in account 1310 at removed weighted-average inventory value. Supplier credit notes and their VAT consequences require accountant-controlled reconciliation, not an assumed reduction of payable invoices.
+Late invoices/cost changes use a controlled revaluation workflow. It allocates a late cost across received lines and posts the quantity currently on hand to inventory and the sold quantity to cost of goods sold; it never rewrites historical movements. Supplier physical returns create a claim in account 1310 at removed weighted-average inventory value. Supplier credits validate their referenced bill, purchase, or supplier-return claim and reduce the payable only through explicit allocations.
 
-WooCommerce observations stay in shadow tables with external IDs. They do not promote orders into the ERP, reserve stock or post revenue. Historical CSV imports and the eventual inventory ownership cutover are separate, pending work. A cutover must follow the backed-up reconciliation/rollback plan in discovery documentation.
+WooCommerce observations stay in shadow tables with external IDs. They do not promote orders into the ERP, reserve stock or post revenue. CSV imports cover controlled product, party, opening-balance, historical-journal and bank-file migration; the inventory ownership cutover remains a separate controlled project that must follow the backed-up reconciliation/rollback plan in discovery documentation.
 
-CSV exports open in Excel and protect against formula injection. Native XLSX/PDF statutory reports, tax returns, automated bank feeds, API bearer-token provisioning, post-receipt revaluation and fully automated prepayments are outside this release. Financial reports require accountant validation for statutory use. Product and channel filters include attributed ledger lines; shared operating expenses are not allocated artificially.
+CSV, native XLSX and PDF exports protect against formula injection. Scoped bearer-token provisioning is available for three read-only endpoints, and bank CSV files can be imported and matched. Automated bank feeds, tax returns, external fiscal issuance, WooCommerce order promotion, hardware-mediated printing, and statutory-report certification remain outside this release. Financial reports require accountant validation for statutory use. Product and channel filters include attributed ledger lines; shared operating expenses are not allocated artificially.
 
 ## Facts needed before launch
 

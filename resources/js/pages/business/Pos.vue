@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {Head,useForm,router}from'@inertiajs/vue3';import{ref}from'vue';
 const p=defineProps<{channels:any[];customers:any[]}>();const search=ref('');const found=ref<any[]>([]);const message=ref('');const quote=ref<any>(null);
-const f=useForm<any>({reference:'',channel_id:'',customer_id:'',ordered_on:new Date().toISOString().slice(0,10),delivery_charge:'0',operation_key:crypto.randomUUID(),lines:[]});
+const f=useForm<any>({reference:'',channel_id:'',customer_id:'',ordered_on:new Date().toISOString().slice(0,10),promotion_code:'',delivery_charge:'0',operation_key:crypto.randomUUID(),lines:[]});
 const csrf=()=>document.querySelector<HTMLMetaElement>('meta[name=csrf-token]')?.content??'';
 async function lookup(barcode=false){message.value='';const response=await fetch('/catalog/search?'+new URLSearchParams({[barcode?'barcode':'q']:search.value}),{headers:{Accept:'application/json'}});const data=await response.json();found.value=data.products??[];if(barcode&&found.value.length===1){add(found.value[0]);search.value='';found.value=[];}else if(!found.value.length)message.value='Produkti nuk u gjet.';}
 function plusOne(s:string){const [a,b='']=s.split('.');const value=BigInt(a)*1000000n+BigInt(b.padEnd(6,'0'))+1000000n;return `${value/1000000n}.${String(value%1000000n).padStart(6,'0')}`;}

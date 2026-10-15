@@ -24,7 +24,9 @@ The database starts empty of business transactions. The owner must confirm accou
 - Channel-specific sales, partial dispatch, delivery-based or dispatch-based recognition, discounts by permission, cancellations, partial customer payments, financial credits, inspected physical returns and bounded refunds.
 - Courier collections and partial remittances with fees and unresolved shortfalls, failed deliveries/returned parcels, bank statement matching and cash/bank transfers.
 - Supplier invoices, partial payments, recurring invoice confirmation, balanced journals, editable drafts, reversals and accounting period closing.
-- Dashboard, date/channel/product filters, monthly charts, product margins, budget comparisons and CSV exports for Excel/accountant review.
+- Dashboard, date/channel/product filters, monthly charts, product margins, budget comparisons and CSV, native XLSX, and PDF report exports for Excel/accountant review.
+- Customer deposits allocated only to recognized receivables, controlled supplier credits, late landed-cost revaluation split between current inventory and cost of goods sold, promotions/coupons, and delivery-charge credits/refunds.
+- Guided CSV templates, previews, duplicate-safe product/party/opening-balance/historical/bank imports, bank-file matching, and owner-issued read-only scoped API tokens.
 - Private document uploads, an internal 80 mm receipt view and Code 128 product labels, POS product/barcode entry and server-calculated quotations.
 - Read-only WooCommerce REST/webhook client, encrypted credentials, duplicate protection, shadow records, queued retry, reconciliation and credential rotation. It never writes WooCommerce stock or creates ERP accounting from imported snapshots.
 - Fiscal provider interface, frozen request identifiers, confirmed/unknown/rejected states and a duplicate-issuance guard. The production adapter intentionally remains unconfigured.
@@ -34,7 +36,7 @@ The database starts empty of business transactions. The owner must confirm accou
 
 This is an implemented local release, not a deployed production ERP. No VPS, DNS/TLS configuration, VAT decision, WooCommerce credentials, certified fiscal provider or printer/scanner connection details are available. External issuance, physical hardware operation, live synchronization, production deployment and off-server backup recovery cannot be validated yet. Local browser access was denied by the browser permission policy, so visual/browser end-to-end testing remains outstanding.
 
-Prepayments/deposits, post-receipt landed-cost revaluation, bulk historical-data import, automatic Woo order promotion and stock-ownership cutover are not implemented. Required fiscal operations stay blocked until an authorized adapter confirms the specific operation. Internal printed documents are prominently marked as non-fiscal. See [release status](docs/release-status.md) for the precise boundaries.
+The internal workflows for prepayments/deposits, post-receipt landed-cost revaluation, supplier credits, historical CSV import, bank-file import/matching, promotions, delivery refunds, report downloads, and read-only API tokens are implemented. Required fiscal operations stay blocked until an authorized adapter confirms the specific operation. Internal printed documents are prominently marked as non-fiscal. See [release status](docs/release-status.md) for the precise boundaries.
 
 ## Verify
 
@@ -52,6 +54,7 @@ The runner uses only `techpoint_testing`, then a uniquely named restore database
 - [JSON/REST contract](docs/api.md)
 - [Deployment, monitoring, backup and recovery](docs/operations/deployment.md)
 - [Calculation rules and integrity](docs/calculations.md)
+- [Advanced finance, imports and API workflows](docs/advanced-workflows.md)
 - [Release status and acceptance gates](docs/release-status.md)
 - [Native Linux secret-permission fix](docs/secret-permission-fix.md)
 - [Discovery proposal](docs/discovery/TechPoint-Phase-0-Proposal.md)

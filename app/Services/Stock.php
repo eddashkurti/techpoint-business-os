@@ -71,4 +71,25 @@ final class Stock
 
         return $result;
     }
+
+    /** Apply a documented value-only adjustment while preserving the physical quantity. */
+    public function revalue(int $productId, string $value, string $condition, string $source, string|int $sourceId, string $reason, string $date): CostingResult
+    {
+        if (! in_array($condition, ['sellable', 'quarantine', 'damaged'], true) || trim($reason) === '') {
+            throw new \DomainException('Gjendja dhe arsyeja janë të detyrueshme.');
+        }
+        $b = $this->balance($productId, $condition);
+        $previous = new InventoryCostState($b->on_hand, $b->value);
+        $adjustment = Posting::decimal($value);
+        $nextValue = Posting::decimal($b->value)->plus($adjustment);
+        if ($nextValue->isNegative()) {
+            throw new \DomainException('Korrigjimi nuk mund ta bëjë vlerën e stokut negative.');
+        }
+        $result = new CostingResult($previous, new InventoryCostState($b->on_hand, (string) $nextValue), '0.000000', (string) $adjustment);
+        DB::table('stock_balances')->where('id', $b->id)->update(['value' => (string) $nextValue, 'updated_at' => now()]);
+        DB::table('stock_movements')->insert(['warehouse_id' => 1, 'product_id' => $productId, 'condition' => $condition, 'kind' => 'revalue', 'quantity' => '0.000000', 'value' => (string) $adjustment, 'balance_quantity' => $result->current->quantity->amount(), 'balance_value' => (string) $result->current->value, 'source_type' => $source, 'source_id' => (string) $sourceId, 'reason' => $reason, 'user_id' => auth()->id(), 'occurred_at' => $date.' 12:00:00', 'created_at' => now()]);
+        Audit::record('stock.revalue', 'product', $productId, ['source' => $source, 'source_id' => $sourceId, 'value' => (string) $adjustment]);
+
+        return $result;
+    }
 }

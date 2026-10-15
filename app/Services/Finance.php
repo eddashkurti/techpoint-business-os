@@ -51,7 +51,8 @@ final class Finance
             $this->cashAccount($data['account_id']);
             $amount = Money::of($data['amount']);
             $paid = Money::of((string) DB::table('payments')->where('bill_id', $billId)->sum('amount'));
-            if ($amount->isNegative() || $amount->isZero() || $paid->add($amount)->compare(Money::of($bill->gross_amount)) > 0) {
+            $credited = Money::of((string) DB::table('supplier_credit_allocations')->where('bill_id', $billId)->sum('amount'));
+            if ($amount->isNegative() || $amount->isZero() || $paid->add($credited)->add($amount)->compare(Money::of($bill->gross_amount)) > 0) {
                 throw new \DomainException('Pagesa tejkalon shumën e hapur.');
             }
             $id = DB::table('payments')->insertGetId(['kind' => 'supplier', 'bill_id' => $billId, 'account_id' => $data['account_id'], 'amount' => $amount->amount(), 'method' => $data['method'], 'reference' => $data['reference'], 'operation_key' => $data['operation_key'], 'paid_on' => $data['paid_on'], 'user_id' => auth()->id(), 'created_at' => now()]);
@@ -68,7 +69,7 @@ final class Finance
             throw new \DomainException('Zgjidhni llogarinë e arkës ose bankës.');
         }
 
-return $a;
+        return $a;
     }
 
     public function transfer(array $data): array
