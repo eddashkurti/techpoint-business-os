@@ -19,3 +19,4 @@ compose run --rm app php artisan techpoint:routes
 docker run --rm -v "$PWD:/app" -w /app -e WAYFINDER_SKIP=1 node:24-bookworm-slim bash -c 'npm ci && npm run build && npx vue-tsc --noEmit && npm audit --audit-level=high'
 compose run --rm app bash infra/scripts/test-dev.sh
 python3 -m unittest discover -s infra/tests
+bash infra/tests/test-secret-permissions.sh

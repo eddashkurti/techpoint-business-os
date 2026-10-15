@@ -15,4 +15,9 @@ for name in db_password db_root_password db_backup_password restic_password; do
 done
 printf 'base64:%s\n' "$(openssl rand -base64 32)" > "$destination/app_key"
 chmod 600 "$destination"/*
+# Compose binds this file into MySQL's /run/secrets directory. MySQL runs its
+# initialization scripts as the mysql user, so it must be able to read it.
+# The 0700 host parent still prevents other host users from reaching the file;
+# only the database service receives this particular secret mount.
+chmod 444 "$destination/db_backup_password"
 echo 'Secret files created. Keep APP_KEY and restic recovery material independently recoverable.'

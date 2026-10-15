@@ -53,6 +53,7 @@ The runner uses only `techpoint_testing`, then a uniquely named restore database
 - [Deployment, monitoring, backup and recovery](docs/operations/deployment.md)
 - [Calculation rules and integrity](docs/calculations.md)
 - [Release status and acceptance gates](docs/release-status.md)
+- [Native Linux secret-permission fix](docs/secret-permission-fix.md)
 - [Discovery proposal](docs/discovery/TechPoint-Phase-0-Proposal.md)
 - [Fiscal research](docs/discovery/phase0-fiscal-research.md)
 - [Hosting and cost research](docs/discovery/phase0-stack-hosting.md)

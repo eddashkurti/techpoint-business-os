@@ -23,6 +23,10 @@ Take a verified remote backup before schema changes. Build the new immutable ima
 
 ## Backups
 
+The secret generator keeps its host directory at `0700` and the application key, application/root database passwords and restic password at `0600`. Only `db_backup_password` uses `0444`: MySQL reads that individual read-only mount while running initialization as its `mysql` user. The private host parent prevents other host users from reaching the file; only the database service receives the mount. For secrets generated before this fix, an administrator must retain the `0700` parent and apply `chmod 0444 /etc/techpoint/secrets/db_backup_password` before first database initialization. No password rotation is needed for this permission correction.
+
+Run `bash infra/tests/test-secret-permissions.sh` to verify these permissions on native Linux storage, even when the source checkout is on Windows. The test checks the permitted read, denied reads of the other credentials, and protection through the host parent directory. CI runs this check. `validate-images.sh` also uses native Linux secret storage and verifies that the initialized backup account can read the seeded database.
+
 Configure a separate machine/service with an encrypted restic repository. Supported configurations include SFTP, S3-compatible, B2 or HTTPS rest endpoints; the script rejects local-only destinations. Copy `infra/config/backup.env.example` to `/etc/techpoint/backup.env`, replace every placeholder and provision credentials/password files with restrictive permissions. Keep recovery secrets separately from the VPS and outside Git. Budget this storage explicitly.
 
 Run `backup-init.sh` once for the verified destination. `backup.sh` drains writers and captures consistent database contents, private storage, the application key, row counts, checksums and source/image revision. It restores writer availability through a cleanup trap. Retention is configured in the script. Install the supplied systemd service/timer and check both exit status and actual newest snapshot; a scheduled timer alone is not proof of successful backups.

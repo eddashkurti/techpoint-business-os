@@ -36,3 +36,7 @@ CSV exports open in Excel and protect against formula injection. Native XLSX/PDF
 6. Physical scanner/printer connection and provider-supported printing path; perform witnessed hardware and browser acceptance tests.
 
 The existing WooCommerce site has not been altered and its inventory remains authoritative for live online operations.
+
+## Follow-up — 15 October 2026
+
+The pending native Linux secret-permission diagnostic is resolved. The generator now allows MySQL initialization to read its mounted backup password while keeping the host directory and other credential files private. The diagnostic is tracked as a regression check and included in CI. Native Linux production-startup validation also verifies actual backup-account reads. See [the fix and validation scope](secret-permission-fix.md).

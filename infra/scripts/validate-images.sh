@@ -9,8 +9,18 @@ project="tpimagecheck-$(date -u +%Y%m%d%H%M%S)-$$"
 [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" && -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$project")" ]] || exit 1
 mkdir -p "$root/work/image-validation"
 bundle="$(mktemp -d "$root/work/image-validation/check.XXXXXXXX")"
-mkdir -m 700 "$bundle/secrets" "$bundle/tls" "$bundle/tls/live" "$bundle/tls/live/erp.validation.invalid"
-bash "$root/infra/scripts/create-secrets.sh" "$bundle/secrets" >/dev/null
+secret_volume="${project}-secrets"
+[[ -z "$(docker volume ls -q --filter "name=^${secret_volume}$")" ]] || exit 1
+docker volume create "$secret_volume" >/dev/null
+compose() { docker compose --project-name "$project" --env-file "$bundle/compose.env" -f "$root/infra/compose.yaml" "$@"; }
+cleanup() { status=$?; trap - EXIT; if [[ -f "$bundle/compose.env" ]]; then if [[ "$status" != 0 ]]; then compose logs --no-color db app > "$bundle/runtime-failure.log" 2>&1 || true; fi; compose down --volumes >/dev/null 2>&1 || true; fi; docker volume rm "$secret_volume" >/dev/null 2>&1 || true; exit "$status"; }
+trap cleanup EXIT
+secret_mount="$(docker volume inspect --format '{{.Mountpoint}}' "$secret_volume")"
+[[ "$secret_mount" == /* && "$secret_mount" == *"/$secret_volume/_data" ]] || exit 1
+secrets_directory="$secret_mount/protected"
+# Native Linux storage makes permission failures visible even on a Windows checkout.
+docker run --rm -v "$secret_volume:/secrets" -v "$root/infra/scripts/create-secrets.sh:/make-secrets.sh:ro" --entrypoint bash mysql:8.4 -c 'bash /make-secrets.sh /secrets/protected >/dev/null'
+mkdir -m 700 "$bundle/tls" "$bundle/tls/live" "$bundle/tls/live/erp.validation.invalid"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=erp.validation.invalid' -keyout "$bundle/tls/live/erp.validation.invalid/privkey.pem" -out "$bundle/tls/live/erp.validation.invalid/fullchain.pem" >/dev/null 2>&1
 cat > "$bundle/compose.env" <<ENV
 COMPOSE_PROJECT_NAME=$project
@@ -21,17 +31,16 @@ WEB_IMAGE=techpoint-web
 APP_IMAGE_TAG=validation
 DB_DATABASE=techpoint_validation
 DB_USERNAME=techpoint_validation
-SECRETS_DIRECTORY=$bundle/secrets
+SECRETS_DIRECTORY=$secrets_directory
 TLS_DIRECTORY=$bundle/tls
 ACME_DIRECTORY=$bundle/acme
 ENV
-compose() { docker compose --project-name "$project" --env-file "$bundle/compose.env" -f "$root/infra/compose.yaml" "$@"; }
-cleanup() { status=$?; trap - EXIT; if [[ "$status" != 0 ]]; then compose logs --no-color db app > "$bundle/runtime-failure.log" 2>&1 || true; fi; compose down --volumes >/dev/null 2>&1 || true; exit "$status"; }
-trap cleanup EXIT
 compose up -d --wait db app
 compose --profile maintenance run --rm migrate > "$bundle/migrations.log" 2>&1
 compose --profile maintenance run --rm migrate php artisan db:seed --force > "$bundle/seeding.log" 2>&1
 compose exec -T app php artisan techpoint:reconcile --json > "$bundle/reconciliation.json"
+compose exec -T db bash -c 'MYSQL_PWD="$(cat /run/secrets/db_backup_password)" exec mysql --user=techpoint_backup --database="$MYSQL_DATABASE" --batch --skip-column-names --execute="SELECT COUNT(*) FROM accounts;"' > "$bundle/backup-account-read-check.txt"
+[[ "$(cat "$bundle/backup-account-read-check.txt")" =~ ^[1-9][0-9]*$ ]] || { echo 'Backup account could not read the seeded database.' >&2; exit 1; }
 compose exec -T db bash -c 'MYSQL_PWD="$(cat /run/secrets/db_password)" exec mysql --user="$MYSQL_USER" --database="$MYSQL_DATABASE" --batch --skip-column-names --execute="SHOW GRANTS FOR CURRENT_USER;"' > "$bundle/application-grants.txt"
 python3 - "$bundle/application-grants.txt" <<'PY'
 import sys
